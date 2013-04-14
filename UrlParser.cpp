@@ -3,12 +3,13 @@
 //
 //Author: Tony Zhou
 
-#include <regex>
 #include <boost/algorithm/string.hpp>
 #include <string>
 #include <vector>
 #include <iostream>
 #include <sstream>
+#include <algorithm>
+#include <functional>
 
 #include "UrlParser.h"
 
@@ -16,19 +17,8 @@ using namespace boost;
 using namespace HTTPHELPER;
 using namespace std;
 
-//Parse URI parts with this regular expression:
-//^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?
-// 12            3  4          5       6  7        8 9
-//
-//	scheme 		= $2
-//	authority 	= $4
-//	path		= $5
-//	query		= $7
-//	fragment	= $9
-regex urlRegExp("^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\\?([^#]*))?(#(.*))?");
-
 UrlParser::UrlParser(const string & url) :
-	schema_("http"),
+	schema_(),
 	host_(),
 	port_(80),
 	path_(),
@@ -40,24 +30,41 @@ UrlParser::UrlParser(const string & url) :
 
 void UrlParser::parse(const string & url)
 {
-	cmatch what;
-	//Parse URI parts with regex_match function, regex utility is included in C++11 standard
-	//check the definition of urlRegExp for detailed info 
-	if(regex_search(url.c_str(), what, urlRegExp))
-	{
-		valid_ = true;
-		
-		schema_ = what[2].second;
-		parseAuthorityString(what[4].second, host_, &port_);
-		path_ = what[5].second;
-		query_ = what[7].second;
-		parseQueryParams(what[7].second, queryParams_);
-		fragment_ = what[9].second;
-	}
-	else
-	{
-		valid_ = false;
-	}
+    const string prot_end("://");
+    string::const_iterator prot_i = search(url.begin(), url.end(),
+                                         prot_end.begin(), prot_end.end());
+    schema_.reserve(distance(url.begin(), prot_i));
+    transform(url.begin(), prot_i,
+            back_inserter(schema_),
+            ptr_fun<int,int>(tolower)); 
+    if( prot_i == url.end() )
+        return;
+    advance(prot_i, prot_end.length());
+    string::const_iterator path_i = find(prot_i, url.end(), '/');
+    string authority;
+    authority.reserve(distance(prot_i, path_i));
+
+    transform(prot_i, path_i,
+            back_inserter(authority),
+            ptr_fun<int,int>(tolower)); 
+    parseAuthorityString(authority, host_, &port_);
+    string::const_iterator query_i = find(path_i, url.end(), '?');
+    path_.assign(path_i, query_i);
+
+    if( query_i != url.end() )
+        ++query_i;
+    string::const_iterator fragment_i = find(query_i, url.end(), '#');
+    if(fragment_i != url.end())
+    {
+        query_.assign(query_i, fragment_i);
+        ++fragment_i;
+        fragment_.assign(fragment_i, url.end());
+    }
+    else
+    {
+        query_.assign(query_i, url.end());
+    }
+    parseQueryParams(query_, queryParams_);
 }
 
 void UrlParser::parseAuthorityString(const string & authorityStr, string & host, unsigned int * portNo)
